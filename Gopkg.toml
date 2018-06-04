@@ -1,0 +1,7 @@
+[[constraint]]
+  branch = "master"
+  name = "github.com/go-sql-driver/mysql"
+
+[prune]
+  go-tests = true
+  unused-packages = true
