@@ -362,8 +362,11 @@ func (l *loader) load(ctx context.Context, q *query, charset, database string) e
 }
 
 func quoteName(name string) []byte {
-	buf := make([]byte, len(name)*2)
-	i := 0
+	var i int
+	buf := make([]byte, len(name)*2+2)
+
+	buf[i] = '`'
+	i++
 	for j := 0; j < len(name); j++ {
 		if name[j] == '`' {
 			buf[i] = '`'
@@ -372,6 +375,9 @@ func quoteName(name string) []byte {
 		buf[i] = name[j]
 		i++
 	}
+	buf[i] = '`'
+	i++
+
 	return buf[:i]
 }
 
