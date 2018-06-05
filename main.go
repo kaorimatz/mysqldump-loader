@@ -213,7 +213,7 @@ func (s *scanner) scan() bool {
 				s.stringLiteral = str[i+j] == '\''
 				i += j + 1
 			} else if s.quote != 0 && str[i+j] == s.quote {
-				if !s.stringLiteral && len(str) > i + j + 1 && str[i+j+1] == s.quote {
+				if !s.stringLiteral && len(str) > i+j+1 && str[i+j+1] == s.quote {
 					i += j + 2
 				} else {
 					s.quote = 0
