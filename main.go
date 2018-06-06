@@ -479,11 +479,7 @@ func (c *converter) convert(q *query) (*insertion, error) {
 					buf.WriteString(q.s[i : i+j])
 					i += j
 					if q.s[i] == '\\' {
-						if strings.IndexByte("0nr\\'\"Z", q.s[i+1]) != -1 {
-							buf.WriteString(q.s[i : i+2])
-						} else {
-							return nil, fmt.Errorf("expected escape sequence. line=%d, query=%s", q.line, q.s)
-						}
+						buf.WriteString(q.s[i : i+2])
 						i += 2
 					} else if q.s[i] == '\t' {
 						buf.WriteString(`\t`)
