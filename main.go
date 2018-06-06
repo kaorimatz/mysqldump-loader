@@ -336,6 +336,10 @@ func (l *loader) load(ctx context.Context, q *query, charset, database string) e
 		query.WriteByte('.')
 	}
 	query.Write(quoteName(i.table))
+	if charset != "" {
+		query.WriteString(" CHARACTER SET ")
+		query.WriteString(charset)
+	}
 
 	mysql.RegisterReaderHandler(strconv.Itoa(q.line), func() io.Reader { return i.r })
 	defer mysql.DeregisterReaderHandler(strconv.Itoa(q.line))
