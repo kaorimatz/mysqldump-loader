@@ -418,7 +418,7 @@ func (c *converter) convert(q *query) (*insertion, error) {
 		replace = true
 		i = len("REPLACE ")
 	} else {
-		return nil, fmt.Errorf("unsupported statement. line=%d, query=%s", q.line, q.s)
+		return nil, fmt.Errorf("unsupported statement. line=%d", q.line)
 	}
 
 	if strings.HasPrefix(q.s[i:], "IGNORE ") {
@@ -429,12 +429,12 @@ func (c *converter) convert(q *query) (*insertion, error) {
 	if strings.HasPrefix(q.s[i:], "INTO ") {
 		i += len("INTO ")
 	} else {
-		return nil, fmt.Errorf("unsupported statement. line=%d, query=%s", q.line, q.s)
+		return nil, fmt.Errorf("unsupported statement. line=%d", q.line)
 	}
 
 	table, i, err := parseName(q.s, i, " ")
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse table name. err=%s, line=%d, query=%s", err, q.line, q.s)
+		return nil, fmt.Errorf("failed to parse table name. err=%s, line=%d", err, q.line)
 	}
 	i++
 
@@ -443,7 +443,7 @@ func (c *converter) convert(q *query) (*insertion, error) {
 		for {
 			_, i, err = parseName(q.s, i, ",)")
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse column name. err=%s, line=%d, query=%s", err, q.line, q.s)
+				return nil, fmt.Errorf("failed to parse column name. err=%s, line=%d", err, q.line)
 			}
 			if q.s[i] == ')' {
 				i++
@@ -451,7 +451,7 @@ func (c *converter) convert(q *query) (*insertion, error) {
 			}
 		}
 		if q.s[i] != ' ' {
-			return nil, fmt.Errorf("no space character after a list of colunm names. line=%d, query=%s", q.line, q.s)
+			return nil, fmt.Errorf("no space character after a list of colunm names. line=%d", q.line)
 		}
 		i++
 	}
@@ -459,7 +459,7 @@ func (c *converter) convert(q *query) (*insertion, error) {
 	if strings.HasPrefix(q.s[i:], "VALUES ") {
 		i += len("VALUES ")
 	} else {
-		return nil, fmt.Errorf("unsupported statement. line=%d, query=%s", q.line, q.s)
+		return nil, fmt.Errorf("unsupported statement. line=%d", q.line)
 	}
 
 	var buf bytes.Buffer
@@ -474,7 +474,7 @@ func (c *converter) convert(q *query) (*insertion, error) {
 					// TODO: NO_BACKSLASH_ESCAPES
 					j := strings.IndexAny(q.s[i:], "\\\t'")
 					if j == -1 {
-						return nil, fmt.Errorf("column value is not enclosed. line=%d, query=%s", q.line, q.s)
+						return nil, fmt.Errorf("column value is not enclosed. line=%d", q.line)
 					}
 					buf.WriteString(q.s[i : i+j])
 					i += j
@@ -488,20 +488,20 @@ func (c *converter) convert(q *query) (*insertion, error) {
 						i++
 						break
 					} else {
-						return nil, fmt.Errorf("unescaped single quote. line=%d, query=%s", q.line, q.s)
+						return nil, fmt.Errorf("unescaped single quote. line=%d", q.line)
 					}
 				}
 			} else if strings.HasPrefix(q.s[i:], "0x") {
 				j := strings.IndexAny(q.s[i+2:], ",)")
 				if j == -1 {
-					return nil, fmt.Errorf("hex blob is not terminated. line=%d, query=%s", q.line, q.s)
+					return nil, fmt.Errorf("hex blob is not terminated. line=%d", q.line)
 				}
 				buf.ReadFrom(hex.NewDecoder(strings.NewReader(q.s[i+2 : i+2+j])))
 				i += 2 + j
 			} else {
 				j := strings.IndexAny(q.s[i:], ",)")
 				if j == -1 {
-					return nil, fmt.Errorf("column value is not terminated. line=%d, query=%s", q.line, q.s)
+					return nil, fmt.Errorf("column value is not terminated. line=%d", q.line)
 				}
 				s := q.s[i : i+j]
 				if s == "NULL" {
@@ -526,7 +526,7 @@ func (c *converter) convert(q *query) (*insertion, error) {
 			i++
 			break
 		} else {
-			return nil, fmt.Errorf("unexpected character '%c'. line=%d query=%s", q.s[i], q.line, q.s)
+			return nil, fmt.Errorf("unexpected character '%c'. line=%d", q.s[i], q.line)
 		}
 	}
 
