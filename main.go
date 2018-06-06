@@ -121,7 +121,7 @@ func parseSetNamesStatement(q *query) (charset string, err error) {
 	if strings.HasPrefix(q.s, "/*!40101 SET NAMES ") {
 		charset, _, err = parseName(q.s, len("/*!40101 SET NAMES "), " ")
 	} else {
-		charset, _, err = parseName(q.s, len("SET NAMES "), " ")
+		charset, _, err = parseName(q.s, len(" SET NAMES "), " ")
 	}
 	return
 }
@@ -266,7 +266,7 @@ func (q *query) isReplaceStatement() bool {
 }
 
 func (q *query) isSetNamesStatement() bool {
-	return strings.HasPrefix(q.s, "SET NAMES ") || strings.HasPrefix(q.s, "/*!40101 SET NAMES ")
+	return strings.HasPrefix(q.s, " SET NAMES ") || strings.HasPrefix(q.s, "/*!40101 SET NAMES ")
 }
 
 func (q *query) isUnlockTablesStatement() bool {
