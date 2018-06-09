@@ -224,6 +224,10 @@ func (s *scanner) scan() bool {
 			} else if s.stringLiteral && str[i+j] == '\\' {
 				i += j + 2
 			} else if !s.comment && s.quote == 0 && str[i+j] == ';' {
+				if len(str) != i+j+2 || str[i+j+1] != '\n' {
+					s.e = fmt.Errorf("newline is expected after ';'. line=%d", s.line)
+					return false
+				}
 				s.buf.WriteString(str[:i+j+1])
 				s.q = &query{line: line + 1, s: s.buf.String()}
 				s.buf.Reset()
