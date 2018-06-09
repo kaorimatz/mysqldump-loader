@@ -119,29 +119,30 @@ func (e *executor) execute() error {
 
 func parseSetNamesStatement(q *query) (charset string, err error) {
 	if strings.HasPrefix(q.s, "/*!40101 SET NAMES ") {
-		charset, _, err = parseName(q.s, len("/*!40101 SET NAMES "), " ")
+		charset, _, err = parseIdentifier(q.s, len("/*!40101 SET NAMES "), " ")
 	} else {
-		charset, _, err = parseName(q.s, len(" SET NAMES "), " ")
+		charset, _, err = parseIdentifier(q.s, len(" SET NAMES "), " ")
 	}
 	return
 }
 
 func parseUseStatement(q *query) (database string, err error) {
-	database, _, err = parseName(q.s, len("USE "), ";")
+	database, _, err = parseIdentifier(q.s, len("USE "), ";")
 	return
 }
 
-func parseName(s string, i int, terms string) (string, int, error) {
+func parseIdentifier(s string, i int, terms string) (string, int, error) {
 	var buf bytes.Buffer
 	if s[i] == '`' || s[i] == '"' {
 		quote := s[i]
+		i++
 		for {
-			j := strings.IndexByte(s[i+1:], quote)
+			j := strings.IndexByte(s[i:], quote)
 			if j == -1 {
-				return "", 0, fmt.Errorf("name is not enclosed by '%c'", quote, s)
+				return "", 0, fmt.Errorf("name is not enclosed by '%c'", quote)
 			}
-			buf.WriteString(s[i+1 : i+1+j])
-			i += j + 2
+			buf.WriteString(s[i : i+j])
+			i += j + 1
 			if strings.IndexByte(terms, s[i]) != -1 {
 				break
 			} else if s[i] == quote {
@@ -436,7 +437,7 @@ func (c *converter) convert(q *query) (*insertion, error) {
 		return nil, fmt.Errorf("unsupported statement. line=%d", q.line)
 	}
 
-	table, i, err := parseName(q.s, i, " ")
+	table, i, err := parseIdentifier(q.s, i, " ")
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse table name. err=%s, line=%d", err, q.line)
 	}
@@ -445,7 +446,7 @@ func (c *converter) convert(q *query) (*insertion, error) {
 	if q.s[i] == '(' {
 		i++
 		for {
-			_, i, err = parseName(q.s, i, ",)")
+			_, i, err = parseIdentifier(q.s, i, ",)")
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse column name. err=%s, line=%d", err, q.line)
 			}
