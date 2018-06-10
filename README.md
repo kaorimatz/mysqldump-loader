@@ -13,11 +13,13 @@ Load a MySQL dump file using LOAD DATA INFILE.
       -concurrency int
             Maximum number of concurrent load operations. (default Number of available CPUs)
       -data-source-name string
-            Data source name for MySQL server to load data into
+            Data source name for MySQL server to load data into.
       -dump-file string
-            MySQL dump file to load
+            MySQL dump file to load.
       -low-priority
-            Use LOW_PRIORITY when loading data
+            Use LOW_PRIORITY when loading data.
+      -replace-table
+            Load data into a temporary table and replace the old table with it once load is complete.
 
 ## Development
 
