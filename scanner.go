@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -32,6 +33,10 @@ func (s *scanner) scan() bool {
 
 	for {
 		str, err := s.reader.ReadString('\n')
+		if err == io.EOF && s.buf.Len() != 0 {
+			s.e = errors.New("unexpected EOF")
+			return false
+		}
 		if err != nil {
 			s.e = err
 			return false
