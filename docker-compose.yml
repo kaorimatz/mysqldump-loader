@@ -1,0 +1,20 @@
+version: '3'
+services:
+  mysql56:
+    image: mysql:5.6
+    ports:
+      - 3306
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+  mysql57:
+    image: mysql:5.7
+    ports:
+      - 3306
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+  mysql80:
+    image: mysql:8.0
+    ports:
+      - 3306
+    environment:
+      MYSQL_ROOT_PASSWORD: password
