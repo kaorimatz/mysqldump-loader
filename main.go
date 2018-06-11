@@ -485,7 +485,9 @@ func convert(q *query) (*insertion, error) {
 				if j == -1 {
 					return nil, fmt.Errorf("hex blob is not terminated. line=%d", q.line)
 				}
-				buf.ReadFrom(hex.NewDecoder(strings.NewReader(q.s[i+2 : i+2+j])))
+				if _, err := buf.ReadFrom(hex.NewDecoder(strings.NewReader(q.s[i+2 : i+2+j]))); err != nil {
+					return nil, fmt.Errorf("failed to decode hex blob. err=%s, line=%d", err, q.line)
+				}
 				i += 2 + j
 			} else {
 				j := strings.IndexAny(q.s[i:], ",)")
