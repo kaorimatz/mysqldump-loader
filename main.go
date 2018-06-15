@@ -76,7 +76,8 @@ type executor struct {
 }
 
 func (e *executor) execute() error {
-	var charset, database, table, tempTable string
+	var table *table
+	var charset, database string
 
 	conn, err := e.db.Conn(context.Background())
 	if err != nil {
@@ -89,52 +90,24 @@ func (e *executor) execute() error {
 		if e.replacer != nil && q.isDropTableStatement() {
 			continue
 		} else if e.replacer != nil && q.isCreateTableStatement() {
-			t, i, err := parseIdentifier(q.s, len("CREATE TABLE "), " ")
+			if table != nil {
+				if err := e.replacer.execute(context.Background(), database, table); err != nil {
+					return err
+				}
+			}
+
+			table, err = parseCreateTableStatement(q)
 			if err != nil {
 				return err
 			}
 
-			if table != "" {
-				wg := e.loader.waitGroup(tempTable)
-				if err := e.replacer.execute(context.Background(), database, tempTable, table, wg); err != nil {
-					return err
-				}
-			}
-			table = t
-			tempTable = "_" + t + "_temp"
-			if err := createTable(context.Background(), conn, database, tempTable, q.s[i:]); err != nil {
+			if err := createTable(context.Background(), conn, database, table); err != nil {
 				return err
 			}
 		} else if q.isAlterTableStatement() || q.isLockTablesStatement() || q.isUnlockTablesStatement() {
 			continue
-		} else if e.replacer != nil && q.isInsertStatement() || q.isReplaceStatement() {
-			i := strings.Index(q.s, "INTO ")
-			if i == -1 {
-				return fmt.Errorf("unsupported statement. line=%d", q.line)
-			}
-			t, _, err := parseIdentifier(q.s, i+5, " ")
-			if err != nil {
-				return err
-			}
-
-			if table != t {
-				if table != "" {
-					wg := e.loader.waitGroup(tempTable)
-					if err := e.replacer.execute(context.Background(), database, tempTable, table, wg); err != nil {
-						return err
-					}
-				}
-				table = t
-				tempTable = "_" + t + "_temp"
-				if err := createTableLike(context.Background(), conn, database, tempTable, table); err != nil {
-					return err
-				}
-			}
-			if err := e.loader.execute(context.Background(), q, charset, database, tempTable); err != nil {
-				return err
-			}
 		} else if q.isInsertStatement() || q.isReplaceStatement() {
-			if err := e.loader.execute(context.Background(), q, charset, database, ""); err != nil {
+			if err := e.loader.execute(context.Background(), q, charset, database, table); err != nil {
 				return err
 			}
 		} else {
@@ -154,9 +127,8 @@ func (e *executor) execute() error {
 		}
 	}
 
-	if e.replacer != nil && table != "" {
-		wg := e.loader.waitGroup(tempTable)
-		if err := e.replacer.execute(context.Background(), database, tempTable, table, wg); err != nil {
+	if e.replacer != nil && table != nil {
+		if err := e.replacer.execute(context.Background(), database, table); err != nil {
 			return err
 		}
 	}
@@ -176,6 +148,121 @@ func (e *executor) execute() error {
 	}
 
 	return nil
+}
+
+func parseCreateTableStatement(q *query) (*table, error) {
+	var buf bytes.Buffer
+	var foreignKeys []string
+
+	origName, i, err := parseIdentifier(q.s, len("CREATE TABLE "), " ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse table name. err=%s, line=%d", err, q.line)
+	}
+	i++
+
+	if !strings.HasPrefix(q.s[i:], "(\n") {
+		return nil, fmt.Errorf("unsupported CREATE TABLE statement. line=%d", q.line)
+	}
+	i += 2
+
+	name := "_" + origName + "_tmp"
+
+	buf.WriteString("(\n")
+	scanner := &tableScanner{s: q.s[i:]}
+	for scanner.scan() {
+		d := scanner.definition()
+		if isConstraintClause(d) {
+			foreignKeys = append(foreignKeys, d)
+		} else {
+			if buf.Len() != 2 {
+				buf.WriteString(",\n")
+			}
+			buf.WriteString("  ")
+			buf.WriteString(d)
+		}
+	}
+	if err := scanner.err(); err != nil {
+		return nil, fmt.Errorf("failed to parse a table definition. err=%s, line=%d", err, q.line)
+	}
+	i += scanner.pos()
+
+	buf.WriteByte('\n')
+	buf.WriteString(q.s[i:])
+
+	return &table{body: buf.String(), foreignKeys: foreignKeys, name: name, origName: origName}, nil
+}
+
+type table struct {
+	body        string
+	foreignKeys []string
+	name        string
+	origName    string
+	wg          sync.WaitGroup
+}
+
+type tableScanner struct {
+	d             string
+	e             error
+	p             int
+	quote         byte
+	s             string
+	stringLiteral bool
+}
+
+func (s *tableScanner) scan() bool {
+	i := s.p
+
+	if !strings.HasPrefix(s.s[i:], "  ") {
+		return false
+	}
+	i += 2
+
+	for {
+		j := strings.IndexAny(s.s[i:], "`\"'\\\n")
+		if j == -1 {
+			return false
+		} else if s.quote == 0 && strings.IndexByte("`\"'", s.s[i+j]) != -1 {
+			s.quote = s.s[i+j]
+			s.stringLiteral = s.s[i+j] == '\''
+			i += j + 1
+		} else if s.quote != 0 && s.s[i+j] == s.quote {
+			if !s.stringLiteral && len(s.s) > i+j+1 && s.s[i+j+1] == s.quote {
+				i += j + 2
+			} else {
+				s.quote = 0
+				s.stringLiteral = false
+				i += j + 1
+			}
+		} else if s.stringLiteral && s.s[i+j] == '\\' {
+			i += j + 2
+		} else if s.quote == 0 && s.s[i+j] == '\n' {
+			if len(s.s) > 1 && s.s[i+j-1] == ',' {
+				s.d = s.s[s.p+2 : i+j-1]
+			} else {
+				s.d = s.s[s.p+2 : i+j]
+			}
+			s.p = i + j + 1
+			return true
+		} else {
+			i += j + 1
+		}
+	}
+}
+
+func (s *tableScanner) err() error {
+	return s.e
+}
+
+func (s *tableScanner) definition() string {
+	return s.d
+}
+
+func (s *tableScanner) pos() int {
+	return s.p
+}
+
+func isConstraintClause(d string) bool {
+	return strings.HasPrefix(d, "CONSTRAINT ")
 }
 
 func parseSetNamesStatement(q *query) (charset string, err error) {
@@ -224,33 +311,16 @@ func parseIdentifier(s string, i int, terms string) (string, int, error) {
 	return buf.String(), i, nil
 }
 
-func createTable(ctx context.Context, conn *sql.Conn, database, table, s string) error {
+func createTable(ctx context.Context, conn *sql.Conn, database string, table *table) error {
 	var query bytes.Buffer
 	query.WriteString("CREATE TABLE ")
 	if database != "" {
 		query.Write(quoteName(database))
 		query.WriteByte('.')
 	}
-	query.Write(quoteName(table))
-	query.WriteString(s)
-	_, err := conn.ExecContext(ctx, query.String())
-	return err
-}
-
-func createTableLike(ctx context.Context, conn *sql.Conn, database, new, orig string) error {
-	var query bytes.Buffer
-	query.WriteString("CREATE TABLE ")
-	if database != "" {
-		query.Write(quoteName(database))
-		query.WriteByte('.')
-	}
-	query.Write(quoteName(new))
-	query.WriteString(" LIKE ")
-	if database != "" {
-		query.Write(quoteName(database))
-		query.WriteByte('.')
-	}
-	query.Write(quoteName(orig))
+	query.Write(quoteName(table.name))
+	query.WriteByte(' ')
+	query.WriteString(table.body)
 	_, err := conn.ExecContext(ctx, query.String())
 	return err
 }
@@ -302,7 +372,6 @@ type loader struct {
 	guardCh     chan struct{}
 	lowPriority bool
 	wg          sync.WaitGroup
-	wgs         map[string]*sync.WaitGroup
 }
 
 func newLoader(db *sql.DB, concurrency int, lowPriority bool) *loader {
@@ -311,30 +380,27 @@ func newLoader(db *sql.DB, concurrency int, lowPriority bool) *loader {
 		errCh:       make(chan error, concurrency),
 		guardCh:     make(chan struct{}, concurrency),
 		lowPriority: lowPriority,
-		wgs:         make(map[string]*sync.WaitGroup),
 	}
 }
 
-func (l *loader) execute(ctx context.Context, q *query, charset, database, table string) error {
+func (l *loader) execute(ctx context.Context, q *query, charset, database string, table *table) error {
 	select {
 	case err := <-l.errCh:
 		return err
 	default:
 	}
 
-	wg, ok := l.wgs[table]
-	if !ok {
-		wg = &sync.WaitGroup{}
-		l.wgs[table] = wg
-	}
-
 	l.guardCh <- struct{}{}
-	wg.Add(1)
 	l.wg.Add(1)
+	if table != nil {
+		table.wg.Add(1)
+	}
 	go func() {
 		defer func() { <-l.guardCh }()
-		defer wg.Done()
 		defer l.wg.Done()
+		if table != nil {
+			defer table.wg.Done()
+		}
 		if err := l.load(ctx, q, charset, database, table); err != nil {
 			l.errCh <- err
 		}
@@ -342,7 +408,7 @@ func (l *loader) execute(ctx context.Context, q *query, charset, database, table
 	return nil
 }
 
-func (l *loader) load(ctx context.Context, q *query, charset, database, table string) error {
+func (l *loader) load(ctx context.Context, q *query, charset, database string, table *table) error {
 	i, err := convert(q)
 	if err != nil {
 		return err
@@ -364,8 +430,8 @@ func (l *loader) load(ctx context.Context, q *query, charset, database, table st
 		query.Write(quoteName(database))
 		query.WriteByte('.')
 	}
-	if table != "" {
-		query.Write(quoteName(table))
+	if table != nil {
+		query.Write(quoteName(table.name))
 	} else {
 		query.Write(quoteName(i.table))
 	}
@@ -573,10 +639,6 @@ func (l *loader) wait() error {
 	}
 }
 
-func (l *loader) waitGroup(table string) *sync.WaitGroup {
-	return l.wgs[table]
-}
-
 type insertion struct {
 	ignore  bool
 	r       io.Reader
@@ -594,7 +656,7 @@ func newReplacer(db *sql.DB) *replacer {
 	return &replacer{db: db, errCh: make(chan error, 1)}
 }
 
-func (s *replacer) execute(ctx context.Context, database, new, old string, wg *sync.WaitGroup) error {
+func (s *replacer) execute(ctx context.Context, database string, table *table) error {
 	select {
 	case err := <-s.errCh:
 		return err
@@ -603,17 +665,15 @@ func (s *replacer) execute(ctx context.Context, database, new, old string, wg *s
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		if wg != nil {
-			wg.Wait()
-		}
-		if err := s.replace(ctx, database, new, old); err != nil {
+		table.wg.Wait()
+		if err := s.replace(ctx, database, table); err != nil {
 			s.errCh <- err
 		}
 	}()
 	return nil
 }
 
-func (s *replacer) replace(ctx context.Context, database, new, old string) error {
+func (s *replacer) replace(ctx context.Context, database string, table *table) error {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return err
@@ -623,10 +683,18 @@ func (s *replacer) replace(ctx context.Context, database, new, old string) error
 	if err := disableForeignKeyChecks(ctx, conn); err != nil {
 		return err
 	}
-	if err := dropTableIfExists(ctx, conn, database, old); err != nil {
+	if err := dropTableIfExists(ctx, conn, database, table.origName); err != nil {
 		return err
 	}
-	return renameTable(ctx, conn, database, new, old)
+	if err := renameTable(ctx, conn, database, table.name, table.origName); err != nil {
+		return err
+	}
+	if len(table.foreignKeys) > 0 {
+		if err := addForeignKeys(ctx, conn, database, table.origName, table.foreignKeys); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func dropTableIfExists(ctx context.Context, conn *sql.Conn, database, table string) error {
@@ -655,6 +723,25 @@ func renameTable(ctx context.Context, conn *sql.Conn, database, old, new string)
 		query.WriteByte('.')
 	}
 	query.Write(quoteName(new))
+	_, err := conn.ExecContext(ctx, query.String())
+	return err
+}
+
+func addForeignKeys(ctx context.Context, conn *sql.Conn, database, table string, foreignKeys []string) error {
+	var query bytes.Buffer
+	query.WriteString("ALTER TABLE ")
+	if database != "" {
+		query.Write(quoteName(database))
+		query.WriteByte('.')
+	}
+	query.Write(quoteName(table))
+	for i, fk := range foreignKeys {
+		if i != 0 {
+			query.WriteByte(',')
+		}
+		query.WriteString(" ADD ")
+		query.WriteString(fk)
+	}
 	_, err := conn.ExecContext(ctx, query.String())
 	return err
 }
