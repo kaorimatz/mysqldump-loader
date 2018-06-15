@@ -437,6 +437,10 @@ func convert(q *query) (*insertion, error) {
 			if q.s[i] == ')' {
 				i++
 				break
+			} else if strings.HasPrefix(q.s[i:], ", ") {
+				i += 2
+			} else {
+				return nil, fmt.Errorf("no space character after ',' in a list of column names. line=%d", q.line)
 			}
 		}
 		if q.s[i] != ' ' {
