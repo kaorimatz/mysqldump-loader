@@ -85,6 +85,8 @@ func (e *executor) execute() error {
 	}
 	defer conn.Close()
 
+	e.loader.start()
+
 	for e.scanner.scan() {
 		q := e.scanner.query()
 		if e.replacer != nil && q.isDropTableStatement() {
@@ -367,19 +369,46 @@ func (q *query) isUseStatement() bool {
 }
 
 type loader struct {
+	ch          chan request
+	concurrency int
 	db          *sql.DB
 	errCh       chan error
-	guardCh     chan struct{}
 	lowPriority bool
 	wg          sync.WaitGroup
 }
 
 func newLoader(db *sql.DB, concurrency int, lowPriority bool) *loader {
 	return &loader{
+		concurrency: concurrency,
 		db:          db,
-		errCh:       make(chan error, concurrency),
-		guardCh:     make(chan struct{}, concurrency),
 		lowPriority: lowPriority,
+	}
+}
+
+func (l *loader) start() {
+	l.ch = make(chan request, l.concurrency*2)
+	l.errCh = make(chan error, l.concurrency)
+
+	l.wg.Add(l.concurrency)
+
+	for i := 0; i < l.concurrency; i++ {
+		go func() {
+			defer l.wg.Done()
+			l.loop()
+		}()
+	}
+}
+
+func (l *loader) loop() {
+	for r := range l.ch {
+		if err := l.load(r.ctx, r.q, r.charset, r.database, r.table); err != nil {
+			l.errCh <- err
+			break
+		}
+
+		if r.table != nil {
+			r.table.wg.Done()
+		}
 	}
 }
 
@@ -390,21 +419,12 @@ func (l *loader) execute(ctx context.Context, q *query, charset, database string
 	default:
 	}
 
-	l.guardCh <- struct{}{}
-	l.wg.Add(1)
 	if table != nil {
 		table.wg.Add(1)
 	}
-	go func() {
-		defer func() { <-l.guardCh }()
-		defer l.wg.Done()
-		if table != nil {
-			defer table.wg.Done()
-		}
-		if err := l.load(ctx, q, charset, database, table); err != nil {
-			l.errCh <- err
-		}
-	}()
+
+	l.ch <- request{ctx: ctx, q: q, charset: charset, database: database, table: table}
+
 	return nil
 }
 
@@ -625,6 +645,8 @@ func setCharacterSet(ctx context.Context, conn *sql.Conn, charset string) error 
 }
 
 func (l *loader) wait() error {
+	close(l.ch)
+
 	waitCh := make(chan struct{})
 	go func() {
 		defer close(waitCh)
@@ -637,6 +659,14 @@ func (l *loader) wait() error {
 	case <-waitCh:
 		return nil
 	}
+}
+
+type request struct {
+	charset  string
+	ctx      context.Context
+	database string
+	q        *query
+	table    *table
 }
 
 type insertion struct {
