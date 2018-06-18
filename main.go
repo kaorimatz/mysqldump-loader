@@ -670,6 +670,7 @@ type insertion struct {
 type replacer struct {
 	client *client
 	errCh  chan error
+	mutex  sync.Mutex
 	wg     sync.WaitGroup
 }
 
@@ -695,6 +696,9 @@ func (r *replacer) execute(ctx context.Context, database string, table *table) e
 }
 
 func (r *replacer) replace(ctx context.Context, database string, table *table) (err error) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
 	if err = r.client.dropTableIfExists(ctx, database, table.origName); err != nil {
 		return
 	}
