@@ -20,6 +20,8 @@ Load a MySQL dump file using LOAD DATA INFILE.
             Use LOW_PRIORITY when loading data.
       -replace-table
             Load data into a temporary table and replace the old table with it once load is complete.
+      -verbose
+            Verbose mode.
 
 ## Development
 

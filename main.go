@@ -25,6 +25,7 @@ var (
 	dumpFile       = flag.String("dump-file", "", "MySQL dump file to load.")
 	lowPriority    = flag.Bool("low-priority", false, "Use LOW_PRIORITY when loading data.")
 	replaceTable   = flag.Bool("replace-table", false, "Load data into a temporary table and replace the old table with it once load is complete.")
+	verbose        = flag.Bool("verbose", false, "Verbose mode.")
 )
 
 func init() {
@@ -117,6 +118,10 @@ func (e *executor) execute() (err error) {
 			table, err = parseCreateTableStatement(q)
 			if err != nil {
 				return
+			}
+
+			if *verbose {
+				log.Printf("Creating new table %s...", quoteName(table.name))
 			}
 
 			if err = e.client.createTable(context.Background(), database, table.name, table.body); err != nil {
@@ -698,6 +703,10 @@ func (r *replacer) execute(ctx context.Context, database string, table *table) e
 func (r *replacer) replace(ctx context.Context, database string, table *table) (err error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+
+	if *verbose {
+		log.Printf("Replacing table %s with new table %s...", quoteName(table.origName), quoteName(table.name))
+	}
 
 	if err = r.client.dropTableIfExists(ctx, database, table.origName); err != nil {
 		return
