@@ -553,6 +553,9 @@ func convert(q *query) (*insertion, error) {
 			if q.s[i] == '(' {
 				i++
 			}
+			if strings.HasPrefix(q.s[i:], "_binary ") {
+				i += len("_binary ")
+			}
 			if q.s[i] == '\'' {
 				i++
 				for {
