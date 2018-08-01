@@ -694,7 +694,7 @@ func (r *replacer) execute(ctx context.Context, database string, table *table) e
 		defer r.wg.Done()
 		table.wg.Wait()
 		if err := r.replace(ctx, database, table); err != nil {
-			r.errCh <- fmt.Errorf("failed to replace table. err=%s, table=%s", err, table)
+			r.errCh <- fmt.Errorf("failed to replace table %s with new table %s. err=%s", err, quoteName(table.origName), quoteName(table.name))
 		}
 	}()
 	return nil
