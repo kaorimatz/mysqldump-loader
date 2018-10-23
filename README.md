@@ -18,6 +18,8 @@ Load a MySQL dump file using LOAD DATA INFILE.
             MySQL dump file to load.
       -low-priority
             Use LOW_PRIORITY when loading data.
+      -mysql-variable value
+            MySQL variable (format: <name>=<value>)
       -replace-table
             Load data into a temporary table and replace the old table with it once load is complete.
       -verbose

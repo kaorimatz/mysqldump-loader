@@ -26,9 +26,35 @@ var (
 	lowPriority    = flag.Bool("low-priority", false, "Use LOW_PRIORITY when loading data.")
 	replaceTable   = flag.Bool("replace-table", false, "Load data into a temporary table and replace the old table with it once load is complete.")
 	verbose        = flag.Bool("verbose", false, "Verbose mode.")
+	mysqlVariables = make(mysqlVariableValue)
 )
 
+type mysqlVariableValue map[string]string
+
+func (v *mysqlVariableValue) String() string {
+	var buf bytes.Buffer
+	for name, value := range *v {
+		if buf.Len() != 0 {
+			buf.WriteByte(',')
+		}
+		buf.WriteString(name)
+		buf.WriteString("=")
+		buf.WriteString(value)
+	}
+	return buf.String()
+}
+
+func (v *mysqlVariableValue) Set(value string) error {
+	parts := strings.SplitN(value, "=", 2)
+	if len(parts) != 2 {
+		return errors.New("must be a name=value pair")
+	}
+	(*v)[parts[0]] = parts[1]
+	return nil
+}
+
 func init() {
+	flag.Var(&mysqlVariables, "mysql-variable", "MySQL variable (format: <name>=<value>)")
 	flag.Lookup("concurrency").DefValue = "Number of available CPUs"
 }
 
@@ -63,7 +89,8 @@ func main() {
 
 		c := client{conn: conn}
 
-		if err = c.disableForeignKeyChecks(ctx); err != nil {
+		mysqlVariables["foreign_key_checks"] = "0"
+		if err = c.setVariables(ctx, mysqlVariables); err != nil {
 			return nil, err
 		}
 

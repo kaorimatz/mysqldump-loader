@@ -50,10 +50,6 @@ func (c *client) createTable(ctx context.Context, database, table, body string) 
 	return c.exec(ctx, query.String())
 }
 
-func (c *client) disableForeignKeyChecks(ctx context.Context) error {
-	return c.exec(ctx, "SET FOREIGN_KEY_CHECKS=0")
-}
-
 func (c *client) dropTableIfExists(ctx context.Context, database, table string) error {
 	var query bytes.Buffer
 
@@ -90,6 +86,23 @@ func (c *client) renameTable(ctx context.Context, database, oldTable, newTable s
 
 func (c *client) setCharacterSet(ctx context.Context, charset string) error {
 	return c.exec(ctx, fmt.Sprintf("SET NAMES %s", charset))
+}
+
+func (c *client) setVariables(ctx context.Context, variables map[string]string) error {
+	var query bytes.Buffer
+
+	query.WriteString("SET ")
+	for name, value := range variables {
+		if query.Len() != 4 {
+			query.WriteString(", ")
+		}
+		query.WriteString("SESSION ")
+		query.WriteString(name)
+		query.WriteString(" = ")
+		query.WriteString(value)
+	}
+
+	return c.exec(ctx, query.String())
 }
 
 func (c *client) exec(ctx context.Context, query string) error {
