@@ -1,2 +1,7 @@
-sign:
-  artifacts: checksum
+builds:
+  - ldflags:
+    - -extldflags -static -s -w
+    env:
+    - CGO_ENABLED=0
+signs:
+  - artifacts: checksum
