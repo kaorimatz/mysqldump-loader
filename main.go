@@ -84,14 +84,14 @@ func main() {
 	clientFactory := func(ctx context.Context) (*client, error) {
 		conn, err := db.Conn(ctx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error getting database connection: %v", err)
 		}
 
 		c := client{conn: conn}
 
 		mysqlVariables["foreign_key_checks"] = "0"
-		if err = c.setVariables(ctx, mysqlVariables); err != nil {
-			return nil, err
+		if err := c.setVariables(ctx, mysqlVariables); err != nil {
+			return nil, fmt.Errorf("error setting MySQL variables: %v", err)
 		}
 
 		return &c, nil
@@ -125,9 +125,10 @@ type executor struct {
 	scanner  *scanner
 }
 
-func (e *executor) execute() (err error) {
+func (e *executor) execute() error {
 	var table *table
 	var charset, database string
+	var err error
 
 	e.loader.start()
 
@@ -137,41 +138,41 @@ func (e *executor) execute() (err error) {
 			continue
 		} else if e.replacer != nil && q.isCreateTableStatement() {
 			if table != nil {
-				if err = e.replacer.execute(context.Background(), database, table); err != nil {
-					return
+				if err := e.replacer.execute(context.Background(), database, table); err != nil {
+					return err
 				}
 			}
 
 			table, err = parseCreateTableStatement(q)
 			if err != nil {
-				return
+				return fmt.Errorf("error parsing CREATE TABLE statement on line %d: %v", q.line, err)
 			}
 
 			if *verbose {
 				log.Printf("Creating new table %s...", quoteName(table.name))
 			}
 
-			if err = e.client.createTable(context.Background(), database, table.name, table.body); err != nil {
-				return
+			if err := e.client.createTable(context.Background(), database, table.name, table.body); err != nil {
+				return fmt.Errorf("error creating table %s: %v", quoteName(table.name), err)
 			}
 		} else if q.isAlterTableStatement() || q.isLockTablesStatement() || q.isUnlockTablesStatement() {
 			continue
 		} else if q.isInsertStatement() || q.isReplaceStatement() {
-			if err = e.loader.execute(context.Background(), q, charset, database, table); err != nil {
-				return
+			if err := e.loader.execute(context.Background(), q, charset, database, table); err != nil {
+				return err
 			}
 		} else {
-			if err = e.client.exec(context.Background(), q.s); err != nil {
-				return
+			if err := e.client.exec(context.Background(), q.s); err != nil {
+				return fmt.Errorf("error executing query on line %d: %v", q.line, err)
 			}
 			if q.isSetNamesStatement() {
 				if charset, err = parseSetNamesStatement(q); err != nil {
-					return
+					return fmt.Errorf("error parsing SET NAMES statement on line %d: %v", q.line, err)
 				}
 			}
 			if q.isUseStatement() {
 				if database, err = parseUseStatement(q); err != nil {
-					return
+					return fmt.Errorf("error parsing USE statement on line %d: %v", q.line, err)
 				}
 			}
 		}
@@ -184,7 +185,7 @@ func (e *executor) execute() (err error) {
 	}
 
 	if err := e.scanner.err(); err != nil {
-		return err
+		return fmt.Errorf("error reading dump file: %v", err)
 	}
 
 	if err := e.loader.wait(); err != nil {
@@ -206,12 +207,12 @@ func parseCreateTableStatement(q *query) (*table, error) {
 
 	origName, i, err := parseIdentifier(q.s, len("CREATE TABLE "), " ")
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse table name. err=%s, line=%d", err, q.line)
+		return nil, fmt.Errorf("error parsing table name: %v", err)
 	}
 	i++
 
 	if !strings.HasPrefix(q.s[i:], "(\n") {
-		return nil, fmt.Errorf("unsupported CREATE TABLE statement. line=%d", q.line)
+		return nil, errors.New("unsupported CREATE TABLE statement")
 	}
 	i += 2
 
@@ -232,7 +233,7 @@ func parseCreateTableStatement(q *query) (*table, error) {
 		}
 	}
 	if err := scanner.err(); err != nil {
-		return nil, fmt.Errorf("failed to parse a table definition. err=%s, line=%d", err, q.line)
+		return nil, fmt.Errorf("error parsing table definition: %v", err)
 	}
 	i += scanner.pos()
 
@@ -447,7 +448,7 @@ func (l *loader) loop() {
 
 	for r := range l.ch {
 		if err := l.load(client, r.ctx, r.q, r.charset, r.database, r.table); err != nil {
-			l.errCh <- err
+			l.errCh <- fmt.Errorf("error loading data on line %d: %v", r.q.line, err)
 			break
 		}
 
@@ -476,7 +477,7 @@ func (l *loader) execute(ctx context.Context, q *query, charset, database string
 func (l *loader) load(client *client, ctx context.Context, q *query, charset, database string, table *table) error {
 	i, err := convert(q)
 	if err != nil {
-		return err
+		return fmt.Errorf("error converting query: %v", err)
 	}
 
 	var query bytes.Buffer
@@ -510,7 +511,7 @@ func (l *loader) load(client *client, ctx context.Context, q *query, charset, da
 
 	if charset != "" {
 		if err := client.setCharacterSet(ctx, charset); err != nil {
-			return err
+			return fmt.Errorf("error setting character set: %v", err)
 		}
 	}
 
@@ -530,7 +531,7 @@ func convert(q *query) (*insertion, error) {
 		replace = true
 		i = len("REPLACE ")
 	} else {
-		return nil, fmt.Errorf("unsupported statement. line=%d", q.line)
+		return nil, errors.New("unsupported statement")
 	}
 
 	if strings.HasPrefix(q.s[i:], "IGNORE ") {
@@ -541,12 +542,12 @@ func convert(q *query) (*insertion, error) {
 	if strings.HasPrefix(q.s[i:], "INTO ") {
 		i += len("INTO ")
 	} else {
-		return nil, fmt.Errorf("unsupported statement. line=%d", q.line)
+		return nil, errors.New("unsupported statement")
 	}
 
 	table, i, err := parseIdentifier(q.s, i, " ")
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse table name. err=%s, line=%d", err, q.line)
+		return nil, fmt.Errorf("error parsing table name: %v", err)
 	}
 	i++
 
@@ -555,7 +556,7 @@ func convert(q *query) (*insertion, error) {
 		for {
 			_, i, err = parseIdentifier(q.s, i, ",)")
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse column name. err=%s, line=%d", err, q.line)
+				return nil, fmt.Errorf("error parsing column name: %v", err)
 			}
 			if q.s[i] == ')' {
 				i++
@@ -563,11 +564,11 @@ func convert(q *query) (*insertion, error) {
 			} else if strings.HasPrefix(q.s[i:], ", ") {
 				i += 2
 			} else {
-				return nil, fmt.Errorf("no space character after ',' in a list of column names. line=%d", q.line)
+				return nil, errors.New("no space character after ',' in a list of column names")
 			}
 		}
 		if q.s[i] != ' ' {
-			return nil, fmt.Errorf("no space character after a list of colunm names. line=%d", q.line)
+			return nil, errors.New("no space character after a list of column names")
 		}
 		i++
 	}
@@ -575,7 +576,7 @@ func convert(q *query) (*insertion, error) {
 	if strings.HasPrefix(q.s[i:], "VALUES ") {
 		i += len("VALUES ")
 	} else {
-		return nil, fmt.Errorf("unsupported statement. line=%d", q.line)
+		return nil, errors.New("unsupported statement")
 	}
 
 	var buf bytes.Buffer
@@ -593,7 +594,7 @@ func convert(q *query) (*insertion, error) {
 					// TODO: NO_BACKSLASH_ESCAPES
 					j := strings.IndexAny(q.s[i:], "\\\t'")
 					if j == -1 {
-						return nil, fmt.Errorf("column value is not enclosed. line=%d", q.line)
+						return nil, errors.New("column value is not enclosed")
 					}
 					buf.WriteString(q.s[i : i+j])
 					i += j
@@ -607,22 +608,22 @@ func convert(q *query) (*insertion, error) {
 						i++
 						break
 					} else {
-						return nil, fmt.Errorf("unescaped single quote. line=%d", q.line)
+						return nil, errors.New("unescaped single quote")
 					}
 				}
 			} else if strings.HasPrefix(q.s[i:], "0x") {
 				j := strings.IndexAny(q.s[i+2:], ",)")
 				if j == -1 {
-					return nil, fmt.Errorf("hex blob is not terminated. line=%d", q.line)
+					return nil, errors.New("hex blob is not terminated")
 				}
 				if _, err := buf.ReadFrom(hex.NewDecoder(strings.NewReader(q.s[i+2 : i+2+j]))); err != nil {
-					return nil, fmt.Errorf("failed to decode hex blob. err=%s, line=%d", err, q.line)
+					return nil, fmt.Errorf("error decoding hex blob: %v", err)
 				}
 				i += 2 + j
 			} else {
 				j := strings.IndexAny(q.s[i:], ",)")
 				if j == -1 {
-					return nil, fmt.Errorf("column value is not terminated. line=%d", q.line)
+					return nil, errors.New("column value is not terminated")
 				}
 				s := q.s[i : i+j]
 				if s == "NULL" {
@@ -647,7 +648,7 @@ func convert(q *query) (*insertion, error) {
 			i++
 			break
 		} else {
-			return nil, fmt.Errorf("unexpected character '%c'. line=%d", q.s[i], q.line)
+			return nil, fmt.Errorf("unexpected character '%c'", q.s[i])
 		}
 	}
 
@@ -728,13 +729,13 @@ func (r *replacer) execute(ctx context.Context, database string, table *table) e
 		defer r.wg.Done()
 		table.wg.Wait()
 		if err := r.replace(ctx, database, table); err != nil {
-			r.errCh <- fmt.Errorf("failed to replace table %s with new table %s. err=%s", err, quoteName(table.origName), quoteName(table.name))
+			r.errCh <- fmt.Errorf("error replacing table %s with new table %s: %v", quoteName(table.origName), quoteName(table.name), err)
 		}
 	}()
 	return nil
 }
 
-func (r *replacer) replace(ctx context.Context, database string, table *table) (err error) {
+func (r *replacer) replace(ctx context.Context, database string, table *table) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -742,21 +743,21 @@ func (r *replacer) replace(ctx context.Context, database string, table *table) (
 		log.Printf("Replacing table %s with new table %s...", quoteName(table.origName), quoteName(table.name))
 	}
 
-	if err = r.client.dropTableIfExists(ctx, database, table.origName); err != nil {
-		return
+	if err := r.client.dropTableIfExists(ctx, database, table.origName); err != nil {
+		return fmt.Errorf("error dropping table %s: %v", quoteName(table.origName), err)
 	}
 
-	if err = r.client.renameTable(ctx, database, table.name, table.origName); err != nil {
-		return
+	if err := r.client.renameTable(ctx, database, table.name, table.origName); err != nil {
+		return fmt.Errorf("error renaming table %s to %s: %v", quoteName(table.name), quoteName(table.origName), err)
 	}
 
 	if len(table.foreignKeys) > 0 {
-		if err = r.client.addForeignKeys(ctx, database, table.origName, table.foreignKeys); err != nil {
-			return
+		if err := r.client.addForeignKeys(ctx, database, table.origName, table.foreignKeys); err != nil {
+			return fmt.Errorf("error restoring foreign keys in table %s: %v", quoteName(table.origName), err)
 		}
 	}
 
-	return
+	return nil
 }
 
 func (r *replacer) wait() error {
