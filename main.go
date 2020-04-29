@@ -316,8 +316,10 @@ func isConstraintClause(d string) bool {
 }
 
 func parseSetNamesStatement(q *query) (charset string, err error) {
-	if strings.HasPrefix(q.s, "/*!40101 SET NAMES ") {
-		charset, _, err = parseIdentifier(q.s, len("/*!40101 SET NAMES "), " ")
+	if strings.HasPrefix(q.s, "/*!") {
+		// A version number after the ! character consists of exactly
+		// 5 digits. See https://github.com/mysql/mysql-server/blob/7d10c82196c8e45554f27c00681474a9fb86d137/sql/sql_lex.cc#L1728-L1735.
+		charset, _, err = parseIdentifier(q.s, len("/*!00000 SET NAMES "), " ")
 	} else {
 		charset, _, err = parseIdentifier(q.s, len(" SET NAMES "), " ")
 	}
@@ -391,7 +393,9 @@ func (q *query) isReplaceStatement() bool {
 }
 
 func (q *query) isSetNamesStatement() bool {
-	return strings.HasPrefix(q.s, " SET NAMES ") || strings.HasPrefix(q.s, "/*!40101 SET NAMES ")
+	return strings.HasPrefix(q.s, " SET NAMES ") ||
+		strings.HasPrefix(q.s, "/*!40101 SET NAMES ") ||
+		strings.HasPrefix(q.s, "/*!50503 SET NAMES ")
 }
 
 func (q *query) isUnlockTablesStatement() bool {
