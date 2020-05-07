@@ -400,7 +400,7 @@ func (q *query) isSetNamesStatement() bool {
 }
 
 func (q *query) isUnlockTablesStatement() bool {
-	return strings.HasPrefix(q.s, "UNLOCK TABLES ")
+	return q.s == "UNLOCK TABLES;"
 }
 
 func (q *query) isUseStatement() bool {
